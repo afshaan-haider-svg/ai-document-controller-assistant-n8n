@@ -1,0 +1,2950 @@
+{
+  "name": "AI Document Controller Assistant",
+  "nodes": [
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "829dd46f-4054-4329-8465-0570e34aa0e4",
+              "leftValue": "={{ Object.keys($binary || {}).length > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -400,
+        -176
+      ],
+      "id": "89586f1c-efd8-48e6-a867-6eda630548b4",
+      "name": "Check Attachment"
+    },
+    {
+      "parameters": {
+        "jsCode": "const binary = $input.item.binary || {};\n\nconst pdfKey = Object.keys(binary).find(key => {\n  const file = binary[key];\n  return file.mimeType === 'application/pdf' || file.fileExtension === 'pdf';\n});\n\nif (!pdfKey) {\n  throw new Error('No PDF attachment found in this email.');\n}\n\nreturn {\n  json: {\n    ...$json,\n    pdf_binary_key: pdfKey,\n    original_file_name: binary[pdfKey].fileName || pdfKey,\n    pdf_mime_type: binary[pdfKey].mimeType || '',\n  },\n  binary: {\n    data: binary[pdfKey],\n  },\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -176,
+        -224
+      ],
+      "id": "0df65cb3-21f5-4689-9ee2-744f1c5f8c8c",
+      "name": "Prepare PDF Binary"
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        -224
+      ],
+      "id": "d6b3b1d3-d7bf-4abb-b62c-612a8d7f1295",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "text": "=Input Text: {{ $json.text }}",
+        "schemaType": "fromJson",
+        "jsonSchemaExample": "{\n  \"project_name\": \"\",\n  \"project_code\": \"\",\n  \"document_type\": \"\",\n  \"discipline\": \"\",\n  \"document_number\": \"\",\n  \"document_title\": \"\",\n  \"revision\": \"\",\n  \"submitted_by\": \"\",\n  \"sender_company\": \"\",\n  \"submission_date\": \"\",\n  \"status\": \"\",\n  \"priority\": \"\",\n  \"missing_fields\": \"\",\n  \"duplicate_key\": \"\",\n  \"new_file_name\": \"\",\n  \"ai_remarks\": \"\",\n  \"action_required\": \"\"\n}",
+        "options": {
+          "systemPromptTemplate": "You are an AI Document Controller Assistant for a construction and engineering consultancy company.\n\nExtract document control metadata from the provided email/PDF text.\n\nClassify the document into one of these document types:\nDrawing, MIR, WIR, RFI, NCR, Material Submittal, Method Statement, Transmittal, Invoice, Contract Document, Other.\n\nClassify discipline into one of these:\nArchitectural, Civil, Structural, Mechanical, Electrical, Plumbing, MEP, QAQC, Safety, General.\n\nRules:\n- If document type is not clearly mentioned, infer from title, document number, and content.\n- If revision is missing, return empty string.\n- If document number is missing, return empty string.\n- If project code is missing, infer from project name if possible, otherwise return empty string.\n- missing_fields should contain comma-separated required fields that are missing.\n- Required fields are: project_name, document_type, discipline, document_number, document_title, revision.\n- duplicate_key should be document_number + \"_\" + revision.\n- status should be \"Received\".\n- priority should be High only for NCR, RFI, urgent, rejected, overdue, or approval-related documents. Otherwise use Normal.\n- action_required should be one of: Save to register, Request missing information, Manual review required.\n- new_file_name format should be: ProjectCode_DocumentType_DocumentNumber_RevRevision.pdf\n- If any required field is missing, action_required must be \"Request missing information\".\n- Return clean structured values only."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.informationExtractor",
+      "typeVersion": 1.2,
+      "position": [
+        208,
+        -224
+      ],
+      "id": "cda804d8-0378-468a-bdd0-0fe8e412c944",
+      "name": "AI Extract Document Metadata"
+    },
+    {
+      "parameters": {
+        "model": "llama-3.1-8b-instant",
+        "options": {
+          "temperature": 0
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        192,
+        -64
+      ],
+      "id": "1c3fc5ea-c5e6-4e82-93d0-b0017a808b94",
+      "name": "Groq Chat Model",
+      "credentials": {
+        "groqApi": {
+          "id": "mxFo5dqFivMGj5Z6",
+          "name": "Groq account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ai = $json.output || $json;\n\nconst now = new Date();\n\nfunction formatDate(date) {\n  return date.toISOString().split('T')[0];\n}\n\nfunction formatTime(date) {\n  return date.toTimeString().split(' ')[0];\n}\n\nconst receivedDate = formatDate(now);\nconst receivedTime = formatTime(now);\n\nconst dueDate = new Date(now);\ndueDate.setDate(dueDate.getDate() + 7);\n\nconst safeDocType = (ai.document_type || \"Other\").replace(/\\s+/g, \"_\");\nconst safeProjectCode = ai.project_code || \"UNKNOWN\";\nconst safeDocNo = ai.document_number || \"NO-DOC-NO\";\nconst safeRevision = ai.revision || \"NA\";\n\nconst newFileName = ai.new_file_name || `${safeProjectCode}_${safeDocType}_${safeDocNo}_Rev${safeRevision}.pdf`;\n\nreturn {\n  json: {\n    log_id: `LOG-${Date.now()}`,\n    date_received: receivedDate,\n    time_received: receivedTime,\n\n    project_name: ai.project_name || \"\",\n    project_code: ai.project_code || \"\",\n    document_type: ai.document_type || \"\",\n    discipline: ai.discipline || \"\",\n    document_number: ai.document_number || \"\",\n    document_title: ai.document_title || \"\",\n    revision: ai.revision || \"\",\n\n    submitted_by: ai.submitted_by || \"\",\n    sender_company: ai.sender_company || \"\",\n    submission_date: ai.submission_date || \"\",\n    status: ai.status || \"Received\",\n    priority: ai.priority || \"Normal\",\n\n    missing_fields: ai.missing_fields || \"\",\n    duplicate_key: ai.duplicate_key || \"\",\n    original_file_name: $json.original_file_name || \"\",\n    new_file_name: newFileName,\n\n    ai_remarks: ai.ai_remarks || \"\",\n    action_required: ai.action_required || \"Manual review required\",\n\n    review_due_date: formatDate(dueDate),\n    days_pending: 0,\n    duplicate_check: \"Pending\",\n    latest_revision: \"Yes\",\n    created_by: \"AI Document Controller Assistant\"\n  },\n  binary: $binary\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        -224
+      ],
+      "id": "ef95c962-cc05-4df6-a762-c13248358c0c",
+      "name": "Normalize AI Output"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "2328cd1b-3d67-4987-9a8a-3552e1580322",
+              "leftValue": "={{ $json.action_required === \"Request missing information\" || $json.missing_fields !== \"\" }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        736,
+        -304
+      ],
+      "id": "654299d3-a66c-41d5-be8f-04673056de17",
+      "name": "Check Missing Information"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY",
+          "mode": "list",
+          "cachedResultName": "AI Document Controller Register",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Document_Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Log_ID": "={{ $json.log_id }}",
+            "Date_Received": "={{ $json.date_received }}",
+            "Time_Received": "={{ $json.time_received }}",
+            "Project_Name": "={{ $json.project_name }}",
+            "Project_Code": "={{ $json.project_code }}",
+            "Document_Type": "={{ $json.document_type }}",
+            "Discipline": "={{ $json.discipline }}",
+            "Document_Number": "={{ $json.document_number }}",
+            "Document_Title": "={{ $json.document_title }}",
+            "Revision": "={{ $json.revision }}",
+            "Submitted_By": "={{ $json.submitted_by }}",
+            "Sender_Email": "={{ $('Receive Document Email').item.json.headers.from }}",
+            "Status": "={{ $json.status }}",
+            "Priority": "={{ $json.priority }}",
+            "File_Name": "={{ $json.original_file_name }}",
+            "New_File_Name": "={{ $json.new_file_name }}",
+            "Review_Due_Date": "={{ $json.review_due_date }}",
+            "Days_Pending": "= {{ $json.days_pending }}",
+            "Duplicate_Check": "={{ $json.duplicate_check }}",
+            "Latest_Revision": "={{ $json.latest_revision }}",
+            "AI_Remarks": "={{ $json.ai_remarks }}",
+            "Action_Required": "={{ $json.action_required }}",
+            "Created_By": "={{ $json.created_by }}",
+            "Google_Drive_Link": "={{ $json.google_drive_link }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Log_ID",
+              "displayName": "Log_ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Date_Received",
+              "displayName": "Date_Received",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Time_Received",
+              "displayName": "Time_Received",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Project_Name",
+              "displayName": "Project_Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Project_Code",
+              "displayName": "Project_Code",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Document_Type",
+              "displayName": "Document_Type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Discipline",
+              "displayName": "Discipline",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Document_Number",
+              "displayName": "Document_Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Document_Title",
+              "displayName": "Document_Title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Revision",
+              "displayName": "Revision",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Submitted_By",
+              "displayName": "Submitted_By",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Sender_Email",
+              "displayName": "Sender_Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Priority",
+              "displayName": "Priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "File_Name",
+              "displayName": "File_Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "New_File_Name",
+              "displayName": "New_File_Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Google_Drive_Link",
+              "displayName": "Google_Drive_Link",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Review_Due_Date",
+              "displayName": "Review_Due_Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Days_Pending",
+              "displayName": "Days_Pending",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Duplicate_Check",
+              "displayName": "Duplicate_Check",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Latest_Revision",
+              "displayName": "Latest_Revision",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "AI_Remarks",
+              "displayName": "AI_Remarks",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Action_Required",
+              "displayName": "Action_Required",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Created_By",
+              "displayName": "Created_By",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1408,
+        224
+      ],
+      "id": "efe5147e-5020-4fb0-aca3-a71b3c9e2fef",
+      "name": "Append Document Log",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MoIECc4qtemsa9LP",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "name": "={{ $json.new_file_name }}",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $json.target_folder_id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        896,
+        224
+      ],
+      "id": "49e54c67-7c92-4f5a-9423-e7ad418deccb",
+      "name": "Upload Document to Drive",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "JKyMNqggLjFoGEEM",
+          "name": "Google Drive OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const upload = $json;\nconst normalized = $(\"Check Duplicate and Revision\").item.json;\n\nconst fileId = upload.id;\nconst driveLink = upload.webViewLink || `https://drive.google.com/file/d/${fileId}/view`;\n\nconst originalFileName =\n  normalized.original_file_name ||\n  $(\"Prepare PDF Binary\").item.json.original_file_name ||\n  \"\";\n\nreturn {\n  json: {\n    ...normalized,\n    original_file_name: originalFileName,\n    google_drive_file_id: fileId,\n    google_drive_link: driveLink,\n    uploaded_file_name: upload.name || normalized.new_file_name\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1168,
+        224
+      ],
+      "id": "53c28d82-609f-4146-ad52-0ecd840b98a0",
+      "name": "Prepare Sheet Row With Drive Link"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const pdfItem = $items(\"Prepare PDF Binary\")[0];\n\nif (!pdfItem.binary || !pdfItem.binary.data) {\n  throw new Error(\"PDF binary data not found from Prepare PDF Binary node.\");\n}\n\nreturn {\n  json: {\n    ...$json\n  },\n  binary: {\n    data: pdfItem.binary.data\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        224
+      ],
+      "id": "63974e36-6f84-4ec9-8e5c-f6d473c93415",
+      "name": "Reattach PDF Binary"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY",
+          "mode": "list",
+          "cachedResultName": "AI Document Controller Register",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Document_Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY/edit#gid=0"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        976,
+        -256
+      ],
+      "id": "99b20a09-5c5a-477d-914d-92e84209baa2",
+      "name": "Get Existing Document Log",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MoIECc4qtemsa9LP",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const current = $items(\"Normalize AI Output\")[0].json;\nconst existingRows = $input.all().map(item => item.json);\n\nfunction normalize(value) {\n  return String(value ?? \"\").trim().toLowerCase();\n}\n\nfunction pick(row, possibleNames) {\n  // Exact match first\n  for (const name of possibleNames) {\n    if (row[name] !== undefined && row[name] !== null) {\n      return row[name];\n    }\n  }\n\n  // Flexible match: handles spaces, underscores, case differences\n  const keys = Object.keys(row);\n  for (const key of keys) {\n    const cleanKey = key.toLowerCase().replace(/[\\s_]/g, \"\");\n    for (const name of possibleNames) {\n      const cleanName = name.toLowerCase().replace(/[\\s_]/g, \"\");\n      if (cleanKey === cleanName) {\n        return row[key];\n      }\n    }\n  }\n\n  return \"\";\n}\n\nfunction parseRevision(rev) {\n  const value = String(rev ?? \"\").trim().toUpperCase();\n\n  if (value === \"\") return -1;\n\n  const numberMatch = value.match(/\\d+/);\n  if (numberMatch) return parseInt(numberMatch[0], 10);\n\n  if (/^[A-Z]$/.test(value)) {\n    return value.charCodeAt(0) - 64;\n  }\n\n  return 0;\n}\n\nconst currentDocNo = normalize(current.document_number);\nconst currentRev = normalize(current.revision);\nconst currentRevNum = parseRevision(current.revision);\n\nconst validRows = existingRows.filter(row => {\n  const rowDocNo = normalize(pick(row, [\n    \"Document_Number\",\n    \"Document Number\",\n    \"document_number\"\n  ]));\n\n  return rowDocNo !== \"\";\n});\n\nconst sameDocumentRows = validRows.filter(row => {\n  const rowDocNo = normalize(pick(row, [\n    \"Document_Number\",\n    \"Document Number\",\n    \"document_number\"\n  ]));\n\n  return rowDocNo === currentDocNo;\n});\n\nconst exactDuplicate = sameDocumentRows.find(row => {\n  const rowRev = normalize(pick(row, [\n    \"Revision\",\n    \"revision\",\n    \"Rev\"\n  ]));\n\n  return rowRev === currentRev;\n});\n\nlet highestExistingRevNum = -1;\nlet highestExistingRevision = \"\";\n\nfor (const row of sameDocumentRows) {\n  const rowRevision = pick(row, [\n    \"Revision\",\n    \"revision\",\n    \"Rev\"\n  ]);\n\n  const revNum = parseRevision(rowRevision);\n\n  if (revNum > highestExistingRevNum) {\n    highestExistingRevNum = revNum;\n    highestExistingRevision = rowRevision;\n  }\n}\n\nlet duplicate_check = \"New Document\";\nlet latest_revision = \"Yes\";\nlet revision_status = \"New\";\nlet action_required = current.action_required || \"Save to register\";\nlet ai_remarks = current.ai_remarks || \"\";\n\nif (exactDuplicate) {\n  duplicate_check = \"Duplicate\";\n  latest_revision = \"No\";\n  revision_status = \"Duplicate Same Revision\";\n  action_required = \"Duplicate document found\";\n  ai_remarks = `Duplicate found: document number ${current.document_number} revision ${current.revision} already exists in register.`;\n} else if (sameDocumentRows.length > 0 && currentRevNum > highestExistingRevNum) {\n  duplicate_check = \"New Revision\";\n  latest_revision = \"Yes\";\n  revision_status = `New revision received. Previous latest revision was ${highestExistingRevision}.`;\n  action_required = \"Save new revision\";\n  ai_remarks = `New revision received for ${current.document_number}. Previous latest revision was ${highestExistingRevision}.`;\n} else if (sameDocumentRows.length > 0 && currentRevNum < highestExistingRevNum) {\n  duplicate_check = \"Old Revision\";\n  latest_revision = \"No\";\n  revision_status = `Older revision received. Latest existing revision is ${highestExistingRevision}.`;\n  action_required = \"Manual review required\";\n  ai_remarks = `Older revision received for ${current.document_number}. Latest existing revision is ${highestExistingRevision}.`;\n}\n\nreturn [{\n  json: {\n    ...current,\n\n    duplicate_check,\n    latest_revision,\n    revision_status,\n    action_required,\n    ai_remarks,\n\n    exact_duplicate_found: exactDuplicate ? \"Yes\" : \"No\",\n    existing_rows_checked: existingRows.length,\n    valid_document_rows_checked: validRows.length,\n    same_document_rows_found: sameDocumentRows.length,\n    previous_latest_revision: highestExistingRevision,\n\n    debug_current_document_number: current.document_number,\n    debug_current_revision: current.revision\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        -256
+      ],
+      "id": "f009dea7-09d3-44d8-acd0-02bf446c66b5",
+      "name": "Check Duplicate and Revision"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "2656996a-032e-49b0-9626-6cb544f095f7",
+              "leftValue": "={{ $json.exact_duplicate_found === \"Yes\" }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1616,
+        -272
+      ],
+      "id": "96a5f979-b9ed-43db-87e5-3b2de09a29d8",
+      "name": "Is Duplicate Document"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY",
+          "mode": "list",
+          "cachedResultName": "AI Document Controller Register",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 313348767,
+          "mode": "list",
+          "cachedResultName": "Email_Replies",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY/edit#gid=313348767"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Reply_ID": "={{ \"RPL-\" + Date.now() }}",
+            "Date": "={{ $json.date_received }}",
+            "Sender_Email": "={{ $('Receive Document Email').item.json.headers.from }}",
+            "Subject": "={{ $(\"Receive Document Email\").item.json.subject || \"\" }}",
+            "Document_Number": "={{ $json.document_number }}",
+            "Reply_Type": " Duplicate Document",
+            "AI_Draft_Message": "={{ $json.ai_remarks }}",
+            "Status": "Draft Required"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Reply_ID",
+              "displayName": "Reply_ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Date",
+              "displayName": "Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Sender_Email",
+              "displayName": "Sender_Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Subject",
+              "displayName": "Subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Document_Number",
+              "displayName": "Document_Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Reply_Type",
+              "displayName": "Reply_Type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "AI_Draft_Message",
+              "displayName": "AI_Draft_Message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2080,
+        -288
+      ],
+      "id": "9ca0600e-9cb1-4957-a4da-27a21033d4e9",
+      "name": "Append Duplicate Log",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MoIECc4qtemsa9LP",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "subject": "={{ $(\"Receive Document Email\").item.json.subject }}",
+        "message": "={{ \n`Dear Sir/Madam,\n\nThis is to inform you that the submitted document appears to be a duplicate submission.\n\nDocument No: ${$json.document_number}\nRevision: ${$json.revision}\nProject: ${$json.project_name}\n\nThe same document number and revision already exist in our document register. Therefore, this submission will not be uploaded again.\n\nKindly submit a revised document if there are any updates or changes.\n\nRegards,\nDocument Control Team`\n}}",
+        "options": {
+          "sendTo": "={{ $('Receive Document Email').item.json.headers.from }}"
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2336,
+        -288
+      ],
+      "id": "30dce17f-f502-4bff-aa70-feddeda79b99",
+      "name": "Create Duplicate Draft Reply",
+      "webhookId": "dafb7c9a-c2ea-4947-922b-7bf82b79fb81",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "R2v4WjvICP2kD8tC",
+          "name": "Gmail account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const current = $json;\n\n// Gmail Trigger node ka exact name same hona chahiye\nconst gmail = $items(\"Receive Document Email\")[0]?.json || {};\n\nfunction getHeader(name) {\n  const headers = gmail.payload?.headers || gmail.headers || [];\n  if (Array.isArray(headers)) {\n    const found = headers.find(h => String(h.name || \"\").toLowerCase() === name.toLowerCase());\n    return found?.value || \"\";\n  }\n  return \"\";\n}\n\nconst fromRaw =\n  gmail.from ||\n  gmail.From ||\n  gmail.sender ||\n  gmail.email ||\n  gmail.headers?.from ||\n  getHeader(\"From\") ||\n  \"\";\n\nconst subject =\n  gmail.subject ||\n  gmail.Subject ||\n  gmail.headers?.subject ||\n  getHeader(\"Subject\") ||\n  \"\";\n\nfunction extractEmail(value) {\n  const text = String(value || \"\");\n  const angleMatch = text.match(/<([^>]+)>/);\n  if (angleMatch) return angleMatch[1].trim();\n\n  const emailMatch = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i);\n  if (emailMatch) return emailMatch[0].trim();\n\n  return text.trim();\n}\n\nconst senderEmail = extractEmail(fromRaw);\n\nreturn {\n  json: {\n    ...current,\n    sender_email: senderEmail,\n    email_from_raw: fromRaw,\n    email_subject: subject,\n    duplicate_reply_message: `Dear Sir/Madam,\n\nThis is to inform you that the submitted document appears to be a duplicate submission.\n\nDocument No: ${current.document_number}\nRevision: ${current.revision}\nProject: ${current.project_name}\n\nThe same document number and revision already exist in our document register. Therefore, this submission will not be uploaded again.\n\nKindly submit a revised document if there are any updates or changes.\n\nRegards,\nDocument Control Team`\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1824,
+        -288
+      ],
+      "id": "528471f0-1351-4a9b-b9f6-ac5fc580378e",
+      "name": "Prepare Duplicate Reply Data"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "d967e9b6-0e00-4da0-85e8-1a5492f4d447",
+              "leftValue": "={{ $json.duplicate_check === \"New Revision\" }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        592,
+        0
+      ],
+      "id": "0ade3c75-1c7c-4d30-96c9-beead94b49b4",
+      "name": "Is New Revision"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY",
+          "mode": "list",
+          "cachedResultName": "AI Document Controller Register",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1738440823,
+          "mode": "list",
+          "cachedResultName": "Revision_History",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY/edit#gid=1738440823"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "History_ID": "={{ \"HIST-\" + Date.now() }}",
+            "Document_Number": "={{ $json.document_number }}",
+            "Document_Title": "={{ $json.document_title }}",
+            "Old_Revision": "={{ $json.previous_latest_revision }}",
+            "New_Revision": "={{ $json.revision }}",
+            "Previous_Status": "Received",
+            "New_Status": "Received",
+            "Received_Date": "={{ $json.date_received }}",
+            "Updated_Date": "={{ $json.date_received }}",
+            "Submitted_By": "={{ $json.submitted_by }}",
+            "Remarks": "={{ $json.ai_remarks }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "History_ID",
+              "displayName": "History_ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Document_Number",
+              "displayName": "Document_Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Document_Title",
+              "displayName": "Document_Title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Old_Revision",
+              "displayName": "Old_Revision",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "New_Revision",
+              "displayName": "New_Revision",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Previous_Status",
+              "displayName": "Previous_Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "New_Status",
+              "displayName": "New_Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Received_Date",
+              "displayName": "Received_Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Updated_Date",
+              "displayName": "Updated_Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Submitted_By",
+              "displayName": "Submitted_By",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Remarks",
+              "displayName": "Remarks",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        832,
+        -32
+      ],
+      "id": "6c9f6181-8dde-4642-bdba-f1994c240e29",
+      "name": "Append Revision History",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MoIECc4qtemsa9LP",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const pdfItem = $items(\"Prepare PDF Binary\")[0];\n\nif (!pdfItem.binary || !pdfItem.binary.data) {\n  throw new Error(\"PDF binary data not found from Prepare PDF Binary node.\");\n}\n\nreturn {\n  json: {\n    ...$json\n  },\n  binary: {\n    data: pdfItem.binary.data\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        -32
+      ],
+      "id": "26646e2d-e769-4fd9-8b1c-7db0c227c411",
+      "name": "Reattach PDF Binary1"
+    },
+    {
+      "parameters": {
+        "name": "={{ $json.new_file_name }}",
+        "driveId": {
+          "__rl": true,
+          "value": "My Drive",
+          "mode": "list",
+          "cachedResultName": "My Drive",
+          "cachedResultUrl": "https://drive.google.com/drive/my-drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $json.target_folder_id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1280,
+        -32
+      ],
+      "id": "c1e09ccf-64d2-4267-8799-76ea3f7ae1fe",
+      "name": "Upload Document to Drive1",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "JKyMNqggLjFoGEEM",
+          "name": "Google Drive OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const upload = $json;\nconst normalized = $(\"Check Duplicate and Revision\").item.json;\n\nconst fileId = upload.id;\nconst driveLink = upload.webViewLink || `https://drive.google.com/file/d/${fileId}/view`;\n\nconst originalFileName =\n  normalized.original_file_name ||\n  $(\"Prepare PDF Binary\").item.json.original_file_name ||\n  \"\";\n\nreturn {\n  json: {\n    ...normalized,\n    original_file_name: originalFileName,\n    google_drive_file_id: fileId,\n    google_drive_link: driveLink,\n    uploaded_file_name: upload.name || normalized.new_file_name\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        -32
+      ],
+      "id": "7915edcd-b584-464c-9484-df56f5d8a71d",
+      "name": "Prepare Sheet Row With Drive Link1"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY",
+          "mode": "list",
+          "cachedResultName": "AI Document Controller Register",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Document_Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Log_ID": "={{ $json.log_id }}",
+            "Date_Received": "={{ $json.date_received }}",
+            "Time_Received": "={{ $json.time_received }}",
+            "Project_Name": "={{ $json.project_name }}",
+            "Project_Code": "={{ $json.project_code }}",
+            "Document_Type": "={{ $json.document_type }}",
+            "Discipline": "={{ $json.discipline }}",
+            "Document_Number": "={{ $json.document_number }}",
+            "Document_Title": "={{ $json.document_title }}",
+            "Revision": "={{ $json.revision }}",
+            "Submitted_By": "={{ $json.submitted_by }}",
+            "Sender_Email": "={{ $('Receive Document Email').item.json.headers.from }}",
+            "Status": "={{ $json.status }}",
+            "Priority": "={{ $json.priority }}",
+            "File_Name": "={{ $json.original_file_name }}",
+            "New_File_Name": "={{ $json.new_file_name }}",
+            "Review_Due_Date": "={{ $json.review_due_date }}",
+            "Days_Pending": "= {{ $json.days_pending }}",
+            "Duplicate_Check": "={{ $json.duplicate_check }}",
+            "Latest_Revision": "={{ $json.latest_revision }}",
+            "AI_Remarks": "={{ $json.ai_remarks }}",
+            "Action_Required": "={{ $json.action_required }}",
+            "Created_By": "={{ $json.created_by }}",
+            "Google_Drive_Link": "={{ $json.google_drive_link }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Log_ID",
+              "displayName": "Log_ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Date_Received",
+              "displayName": "Date_Received",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Time_Received",
+              "displayName": "Time_Received",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Project_Name",
+              "displayName": "Project_Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Project_Code",
+              "displayName": "Project_Code",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Document_Type",
+              "displayName": "Document_Type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Discipline",
+              "displayName": "Discipline",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Document_Number",
+              "displayName": "Document_Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Document_Title",
+              "displayName": "Document_Title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Revision",
+              "displayName": "Revision",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Submitted_By",
+              "displayName": "Submitted_By",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Sender_Email",
+              "displayName": "Sender_Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Priority",
+              "displayName": "Priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "File_Name",
+              "displayName": "File_Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "New_File_Name",
+              "displayName": "New_File_Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Google_Drive_Link",
+              "displayName": "Google_Drive_Link",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Review_Due_Date",
+              "displayName": "Review_Due_Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Days_Pending",
+              "displayName": "Days_Pending",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Duplicate_Check",
+              "displayName": "Duplicate_Check",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Latest_Revision",
+              "displayName": "Latest_Revision",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "AI_Remarks",
+              "displayName": "AI_Remarks",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Action_Required",
+              "displayName": "Action_Required",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Created_By",
+              "displayName": "Created_By",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1744,
+        -32
+      ],
+      "id": "eeb12136-4397-42c9-9eb5-1dcce314a59f",
+      "name": "Append Document Log1",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MoIECc4qtemsa9LP",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const current = $json;\n\n// Gmail Trigger node ka exact name same hona chahiye\nconst gmail = $items(\"Receive Document Email\")[0]?.json || {};\n\nfunction getHeader(name) {\n  const headers = gmail.payload?.headers || gmail.headers || [];\n  if (Array.isArray(headers)) {\n    const found = headers.find(h => String(h.name || \"\").toLowerCase() === name.toLowerCase());\n    return found?.value || \"\";\n  }\n  return \"\";\n}\n\nfunction valueToText(value) {\n  if (!value) return \"\";\n\n  if (typeof value === \"string\") return value;\n\n  if (Array.isArray(value)) {\n    return value.map(valueToText).filter(Boolean).join(\", \");\n  }\n\n  if (typeof value === \"object\") {\n    return (\n      value.email ||\n      value.emailAddress ||\n      value.address ||\n      value.value ||\n      value.text ||\n      value.name ||\n      \"\"\n    );\n  }\n\n  return String(value);\n}\n\nconst fromRaw =\n  valueToText(gmail.from) ||\n  valueToText(gmail.From) ||\n  valueToText(gmail.sender) ||\n  valueToText(gmail.email) ||\n  valueToText(gmail.headers?.from) ||\n  getHeader(\"From\") ||\n  \"\";\n\nconst subject =\n  valueToText(gmail.subject) ||\n  valueToText(gmail.Subject) ||\n  valueToText(gmail.headers?.subject) ||\n  getHeader(\"Subject\") ||\n  \"Missing Document Information\";\n\nfunction extractEmail(value) {\n  const text = valueToText(value);\n\n  const angleMatch = text.match(/<([^>]+)>/);\n  if (angleMatch) return angleMatch[1].trim();\n\n  const emailMatch = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i);\n  if (emailMatch) return emailMatch[0].trim();\n\n  return text.trim();\n}\n\nconst senderEmail = extractEmail(fromRaw);\n\nconst missingFields = current.missing_fields || \"Required document information\";\n\nconst message = `Dear Sir/Madam,\n\nThank you for your document submission.\n\nDuring our document control review, the following required information was found missing:\n\nMissing Information:\n${missingFields}\n\nDocument Title: ${current.document_title || \"Not provided\"}\nDocument No: ${current.document_number || \"Not provided\"}\nRevision: ${current.revision || \"Not provided\"}\nProject: ${current.project_name || \"Not provided\"}\n\nKindly resend the document with the missing information clearly mentioned so that it can be registered and processed further.\n\nRegards,\nDocument Control Team`;\n\nreturn {\n  json: {\n    ...current,\n    sender_email: senderEmail,\n    email_from_raw: fromRaw,\n    email_subject: subject,\n    missing_reply_message: message\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        -416
+      ],
+      "id": "85bf6e3b-ddf9-4e00-a8f9-468d412ad05e",
+      "name": "Prepare Missing Info Reply Data"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY",
+          "mode": "list",
+          "cachedResultName": "AI Document Controller Register",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1637389183,
+          "mode": "list",
+          "cachedResultName": "Missing_Info",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY/edit#gid=1637389183"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Missing_ID": "={{ \"MIS-\" + Date.now() }}",
+            "Date_Received": "={{ $json.date_received }}",
+            "Sender_Email": "={{ $json.sender_email }}",
+            "Document_Title": "={{ $json.document_title }}",
+            "File_Name": "={{ $json.original_file_name }}",
+            "Missing_Fields": "={{ $json.missing_fields }}",
+            "Issue_Type": "Missing Required Information",
+            "AI_Message": "={{ $json.missing_reply_message }}",
+            "Draft_Status": "Draft Created"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Missing_ID",
+              "displayName": "Missing_ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Date_Received",
+              "displayName": "Date_Received",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Sender_Email",
+              "displayName": "Sender_Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Document_Title",
+              "displayName": "Document_Title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "File_Name",
+              "displayName": "File_Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Missing_Fields",
+              "displayName": "Missing_Fields",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Issue_Type",
+              "displayName": "Issue_Type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "AI_Message",
+              "displayName": "AI_Message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Draft_Status",
+              "displayName": "Draft_Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1200,
+        -416
+      ],
+      "id": "92d73cf9-f7ee-4973-b1f7-4974e1cc34cd",
+      "name": "Append Missing Info Log",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MoIECc4qtemsa9LP",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const doc = $(\"Prepare Sheet Row With Drive Link\").item.json;\nconst gmail = $items(\"Receive Document Email\")[0]?.json || {};\n\nfunction getHeader(name) {\n  const headers = gmail.payload?.headers || gmail.headers || [];\n  if (Array.isArray(headers)) {\n    const found = headers.find(h => String(h.name || \"\").toLowerCase() === name.toLowerCase());\n    return found?.value || \"\";\n  }\n  return \"\";\n}\n\nfunction valueToText(value) {\n  if (!value) return \"\";\n\n  if (typeof value === \"string\") return value;\n\n  if (Array.isArray(value)) {\n    return value.map(valueToText).filter(Boolean).join(\", \");\n  }\n\n  if (typeof value === \"object\") {\n    return (\n      value.email ||\n      value.emailAddress ||\n      value.address ||\n      value.value ||\n      value.text ||\n      value.name ||\n      \"\"\n    );\n  }\n\n  return String(value);\n}\n\nfunction extractEmail(value) {\n  const text = valueToText(value);\n\n  const angleMatch = text.match(/<([^>]+)>/);\n  if (angleMatch) return angleMatch[1].trim();\n\n  const emailMatch = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i);\n  if (emailMatch) return emailMatch[0].trim();\n\n  return text.trim();\n}\n\nconst fromRaw =\n  valueToText(gmail.from) ||\n  valueToText(gmail.From) ||\n  valueToText(gmail.sender) ||\n  valueToText(gmail.email) ||\n  valueToText(gmail.headers?.from) ||\n  getHeader(\"From\") ||\n  \"\";\n\nconst subject =\n  valueToText(gmail.subject) ||\n  valueToText(gmail.Subject) ||\n  valueToText(gmail.headers?.subject) ||\n  getHeader(\"Subject\") ||\n  \"Document Submission\";\n\nconst senderEmail = extractEmail(fromRaw);\n\nconst message = `Dear Sir/Madam,\n\nThis is to confirm that your submitted document has been received and registered successfully in our document control system.\n\nProject: ${doc.project_name}\nDocument No: ${doc.document_number}\nDocument Title: ${doc.document_title}\nRevision: ${doc.revision}\nDocument Type: ${doc.document_type}\nDiscipline: ${doc.discipline}\nStatus: ${doc.status}\nReview Due Date: ${doc.review_due_date}\n\nThe document has been uploaded and saved in the project document repository.\n\nGoogle Drive Link:\n${doc.google_drive_link}\n\nRegards,\nDocument Control Team`;\n\nreturn {\n  json: {\n    ...doc,\n    sender_email: senderEmail,\n    email_subject: subject,\n    registered_reply_message: message,\n    reply_type: \"Document Registered\"\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2064,
+        224
+      ],
+      "id": "0e38f2f4-baa3-4e82-8144-6989d1d1a0d2",
+      "name": "Prepare Registered Reply Data"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY",
+          "mode": "list",
+          "cachedResultName": "AI Document Controller Register",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 313348767,
+          "mode": "list",
+          "cachedResultName": "Email_Replies",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY/edit#gid=313348767"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Reply_ID": "={{ \"RPL-\" + Date.now() }}",
+            "Date": "={{ $json.date_received }}",
+            "Sender_Email": "={{ $('Receive Document Email').item.json.headers.from }}",
+            "Subject": "={{ $json.email_subject }}",
+            "Document_Number": "={{ $json.document_number }}",
+            "Reply_Type": "={{ $json.reply_type }}",
+            "AI_Draft_Message": "={{ $json.registered_reply_message }}",
+            "Status": "Draft Created"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Reply_ID",
+              "displayName": "Reply_ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Date",
+              "displayName": "Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Sender_Email",
+              "displayName": "Sender_Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Subject",
+              "displayName": "Subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Document_Number",
+              "displayName": "Document_Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Reply_Type",
+              "displayName": "Reply_Type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "AI_Draft_Message",
+              "displayName": "AI_Draft_Message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2288,
+        224
+      ],
+      "id": "250820c5-366e-45ea-b12d-ce7e09c902be",
+      "name": "Append Registered Email Reply Log",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MoIECc4qtemsa9LP",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "subject": "={{ \"Re: \" + $(\"Prepare Registered Reply Data\").item.json.email_subject }}",
+        "message": "={{ $(\"Prepare Registered Reply Data\").item.json.registered_reply_message }}",
+        "options": {
+          "sendTo": "={{ $(\"Prepare Registered Reply Data\").item.json.sender_email }}"
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2528,
+        224
+      ],
+      "id": "fa5cab80-eed9-427d-9010-8489bc6802f8",
+      "name": "Create Registered Draft Reply",
+      "webhookId": "337f940d-cb85-4eea-bb3b-780d6fb8a0e4",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "R2v4WjvICP2kD8tC",
+          "name": "Gmail account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY",
+          "mode": "list",
+          "cachedResultName": "AI Document Controller Register",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 313348767,
+          "mode": "list",
+          "cachedResultName": "Email_Replies",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY/edit#gid=313348767"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Reply_ID": "={{ \"RPL-\" + Date.now() }}",
+            "Date": "={{ $json.date_received }}",
+            "Sender_Email": "={{ $('Receive Document Email').item.json.headers.from }}",
+            "Subject": "={{ $json.email_subject }}",
+            "Document_Number": "={{ $json.document_number }}",
+            "Reply_Type": "={{ $json.reply_type }}",
+            "AI_Draft_Message": "={{ $json.registered_reply_message }}",
+            "Status": "Draft Created"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Reply_ID",
+              "displayName": "Reply_ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Date",
+              "displayName": "Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Sender_Email",
+              "displayName": "Sender_Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Subject",
+              "displayName": "Subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Document_Number",
+              "displayName": "Document_Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Reply_Type",
+              "displayName": "Reply_Type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "AI_Draft_Message",
+              "displayName": "AI_Draft_Message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2656,
+        -16
+      ],
+      "id": "9b3d6df3-f8e3-48be-9e64-5fab00eeece3",
+      "name": "Append Registered Email Reply Log1",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MoIECc4qtemsa9LP",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "subject": "={{ \"Re: \" + $(\"Prepare Registered Reply Data\").item.json.email_subject }}",
+        "message": "={{ $(\"Prepare Registered Reply Data\").item.json.registered_reply_message }}",
+        "options": {
+          "sendTo": "={{ $(\"Prepare Registered Reply Data\").item.json.sender_email }}"
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2896,
+        -16
+      ],
+      "id": "7a15511f-7ef7-48af-8c29-03d29a57edf0",
+      "name": "Create Registered Draft Reply1",
+      "webhookId": "337f940d-cb85-4eea-bb3b-780d6fb8a0e4",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "R2v4WjvICP2kD8tC",
+          "name": "Gmail account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const doc = $(\"Prepare Sheet Row With Drive Link\").item.json;\nconst gmail = $items(\"Receive Document Email\")[0]?.json || {};\n\nfunction getHeader(name) {\n  const headers = gmail.payload?.headers || gmail.headers || [];\n  if (Array.isArray(headers)) {\n    const found = headers.find(h => String(h.name || \"\").toLowerCase() === name.toLowerCase());\n    return found?.value || \"\";\n  }\n  return \"\";\n}\n\nfunction valueToText(value) {\n  if (!value) return \"\";\n\n  if (typeof value === \"string\") return value;\n\n  if (Array.isArray(value)) {\n    return value.map(valueToText).filter(Boolean).join(\", \");\n  }\n\n  if (typeof value === \"object\") {\n    return (\n      value.email ||\n      value.emailAddress ||\n      value.address ||\n      value.value ||\n      value.text ||\n      value.name ||\n      \"\"\n    );\n  }\n\n  return String(value);\n}\n\nfunction extractEmail(value) {\n  const text = valueToText(value);\n\n  const angleMatch = text.match(/<([^>]+)>/);\n  if (angleMatch) return angleMatch[1].trim();\n\n  const emailMatch = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i);\n  if (emailMatch) return emailMatch[0].trim();\n\n  return text.trim();\n}\n\nconst fromRaw =\n  valueToText(gmail.from) ||\n  valueToText(gmail.From) ||\n  valueToText(gmail.sender) ||\n  valueToText(gmail.email) ||\n  valueToText(gmail.headers?.from) ||\n  getHeader(\"From\") ||\n  \"\";\n\nconst subject =\n  valueToText(gmail.subject) ||\n  valueToText(gmail.Subject) ||\n  valueToText(gmail.headers?.subject) ||\n  getHeader(\"Subject\") ||\n  \"Document Submission\";\n\nconst senderEmail = extractEmail(fromRaw);\n\nconst message = `Dear Sir/Madam,\n\nThis is to confirm that your submitted document has been received and registered successfully in our document control system.\n\nProject: ${doc.project_name}\nDocument No: ${doc.document_number}\nDocument Title: ${doc.document_title}\nRevision: ${doc.revision}\nDocument Type: ${doc.document_type}\nDiscipline: ${doc.discipline}\nStatus: ${doc.status}\nReview Due Date: ${doc.review_due_date}\n\nThe document has been uploaded and saved in the project document repository.\n\nGoogle Drive Link:\n${doc.google_drive_link}\n\nRegards,\nDocument Control Team`;\n\nreturn {\n  json: {\n    ...doc,\n    sender_email: senderEmail,\n    email_subject: subject,\n    registered_reply_message: message,\n    reply_type: \"Document Registered\"\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2416,
+        -16
+      ],
+      "id": "d7587800-27e8-4931-8744-c16575a5b048",
+      "name": "Prepare Registered Reply Data2"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const doc = $json;\n\nfunction normalize(value) {\n  return String(value || \"\")\n    .trim()\n    .toLowerCase()\n    .replace(/[_-]/g, \" \");\n}\n\nconst documentType = normalize(doc.document_type);\n\nconst folderMap = {\n  \"drawing\": {\n    folder_name: \"02_Drawings\",\n    folder_id: \"1hW1NbNIYaZWGaWcIqfxtMIS_cvb-xA70\"\n  },\n  \"mir\": {\n    folder_name: \"03_MIR\",\n    folder_id: \"1Yuolu3Yviw1bUIbrZQFMbFyl8fjK-Ad6\"\n  },\n  \"wir\": {\n    folder_name: \"04_WIR\",\n    folder_id: \"1PO5F9unUQV8_zP4hQ0g7VfeEQOpr9rn1\"\n  },\n  \"rfi\": {\n    folder_name: \"05_RFI\",\n    folder_id: \"1_Y0NLcvRh_svuN6cJRhK_w-QwVEt2Aqr\"\n  },\n  \"ncr\": {\n    folder_name: \"06_NCR\",\n    folder_id: \"1m2So3u_ovm6b0CKZ_pPgE4sCyP28NzaZ\"\n  },\n  \"material submittal\": {\n    folder_name: \"07_Material_Submittals\",\n    folder_id: \"1LN8KMDuea3ptCDt-Ay_z6BL3iR3CoVsh\"\n  },\n  \"method statement\": {\n    folder_name: \"08_Method_Statements\",\n    folder_id: \"1BIXFYUdZSqENFLGOMGqeG1oGzXcGgNZu\"\n  },\n  \"transmittal\": {\n    folder_name: \"09_Transmittals\",\n    folder_id: \"1YAyqFc6tFvSF1A9g6mmM2Duwh_iz--dl\"\n  },\n  \"other\": {\n    folder_name: \"01_Incoming_Documents\",\n    folder_id: \"1t0L9v_94iluA1gr83AgCR-IpG_eu3Vit\"\n  }\n};\n\nlet selected = folderMap[\"other\"];\n\nif (documentType.includes(\"drawing\")) selected = folderMap[\"drawing\"];\nelse if (documentType === \"mir\" || documentType.includes(\"material inspection\")) selected = folderMap[\"mir\"];\nelse if (documentType === \"wir\" || documentType.includes(\"work inspection\")) selected = folderMap[\"wir\"];\nelse if (documentType === \"rfi\" || documentType.includes(\"request for information\")) selected = folderMap[\"rfi\"];\nelse if (documentType === \"ncr\" || documentType.includes(\"non conformance\")) selected = folderMap[\"ncr\"];\nelse if (documentType.includes(\"material submittal\")) selected = folderMap[\"material submittal\"];\nelse if (documentType.includes(\"method statement\")) selected = folderMap[\"method statement\"];\nelse if (documentType.includes(\"transmittal\")) selected = folderMap[\"transmittal\"];\n\nreturn {\n  json: {\n    ...doc,\n    target_folder_name: selected.folder_name,\n    target_folder_id: selected.folder_id\n  },\n  binary: $binary\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1408,
+        -256
+      ],
+      "id": "8a1ae555-82ee-4288-a946-e03ae9dd2d1c",
+      "name": "Set Target Drive Folder"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const gmail = $json;\n\nfunction getHeader(name) {\n  const headers = gmail.payload?.headers || gmail.headers || [];\n  if (Array.isArray(headers)) {\n    const found = headers.find(h => String(h.name || \"\").toLowerCase() === name.toLowerCase());\n    return found?.value || \"\";\n  }\n  return \"\";\n}\n\nfunction valueToText(value) {\n  if (!value) return \"\";\n\n  if (typeof value === \"string\") return value;\n\n  if (Array.isArray(value)) {\n    return value.map(valueToText).filter(Boolean).join(\", \");\n  }\n\n  if (typeof value === \"object\") {\n    return (\n      value.email ||\n      value.emailAddress ||\n      value.address ||\n      value.value ||\n      value.text ||\n      value.name ||\n      \"\"\n    );\n  }\n\n  return String(value);\n}\n\nfunction extractEmail(value) {\n  const text = valueToText(value);\n\n  const angleMatch = text.match(/<([^>]+)>/);\n  if (angleMatch) return angleMatch[1].trim();\n\n  const emailMatch = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i);\n  if (emailMatch) return emailMatch[0].trim();\n\n  return text.trim();\n}\n\nconst fromRaw =\n  valueToText(gmail.from) ||\n  valueToText(gmail.From) ||\n  valueToText(gmail.sender) ||\n  valueToText(gmail.email) ||\n  valueToText(gmail.headers?.from) ||\n  getHeader(\"From\") ||\n  \"\";\n\nconst subject =\n  valueToText(gmail.subject) ||\n  valueToText(gmail.Subject) ||\n  valueToText(gmail.headers?.subject) ||\n  getHeader(\"Subject\") ||\n  \"Document Submission\";\n\nconst senderEmail = extractEmail(fromRaw);\n\nconst now = new Date();\nconst dateReceived = now.toISOString().split(\"T\")[0];\n\nconst message = `Dear Sir/Madam,\n\nThank you for your email.\n\nPlease note that no document attachment was found with your submission. In order to register and process the document in our document control system, kindly resend the email with the required PDF attachment.\n\nRequired attachment format:\nPDF document with project name, document number, revision, discipline, and document title clearly mentioned.\n\nRegards,\nDocument Control Team`;\n\nreturn {\n  json: {\n    date_received: dateReceived,\n    sender_email: senderEmail,\n    email_subject: subject,\n    document_number: \"\",\n    reply_type: \"No Attachment\",\n    no_attachment_message: message,\n    status: \"Draft Created\"\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -592,
+        128
+      ],
+      "id": "71aa3e85-e467-4c79-844d-d8962e16f6af",
+      "name": "Prepare No Attachment Reply Data"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY",
+          "mode": "list",
+          "cachedResultName": "AI Document Controller Register",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 313348767,
+          "mode": "list",
+          "cachedResultName": "Email_Replies",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY/edit#gid=313348767"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Reply_ID": "={{ \"RPL-\" + Date.now() }}",
+            "Date": "={{ $json.date_received }}",
+            "Sender_Email": "={{ $json.sender_email }}",
+            "Subject": "={{ $json.email_subject }}",
+            "Document_Number": "={{ $json.document_number }}",
+            "Reply_Type": "={{ $json.reply_type }}",
+            "AI_Draft_Message": "={{ $json.no_attachment_message }}",
+            "Status": "={{ $json.status }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Reply_ID",
+              "displayName": "Reply_ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Date",
+              "displayName": "Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Sender_Email",
+              "displayName": "Sender_Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Subject",
+              "displayName": "Subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Document_Number",
+              "displayName": "Document_Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Reply_Type",
+              "displayName": "Reply_Type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "AI_Draft_Message",
+              "displayName": "AI_Draft_Message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -384,
+        128
+      ],
+      "id": "baa8ac86-3c70-4c6f-a5aa-3c43bee416bc",
+      "name": "Append No Attachment Reply Log",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MoIECc4qtemsa9LP",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "subject": "={{ \"Re: \" + ($(\"Prepare No Attachment Reply Data\").item.json.email_subject || \"Document Submission\") }}",
+        "message": "=const gmail = $items(\"Receive Document Email\")[0]?.json || {};\n\nconst messageId = gmail.id || gmail.messageId || gmail.message_id || \"\";\n\nif (!messageId) {\n  throw new Error(\"Gmail message ID not found from Gmail Trigger.\");\n}\n\nreturn {\n  json: {\n    ...$json,\n    gmail_message_id: messageId\n  }\n};",
+        "options": {
+          "sendTo": "={{ $(\"Prepare No Attachment Reply Data\").item.json.sender_email }}"
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        -176,
+        128
+      ],
+      "id": "3750456c-db4a-496b-87e1-b33ce63c1e09",
+      "name": "Create No Attachment Draft Reply",
+      "webhookId": "e3248390-2c63-4553-800d-a946f70c5447",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "R2v4WjvICP2kD8tC",
+          "name": "Gmail account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const doc = $items(\"Prepare Sheet Row With Drive Link\")[0]?.json;\n\nif (!doc || !doc.document_number) {\n  throw new Error(\"Document data not found from Prepare Sheet Row With Drive Link\");\n}\n\nreturn {\n  json: {\n    approval_id: `APR-${Date.now()}`,\n    document_number: doc.document_number || \"\",\n    document_title: doc.document_title || \"\",\n    revision: doc.revision || \"\",\n    document_type: doc.document_type || \"\",\n    discipline: doc.discipline || \"\",\n    submitted_by: doc.submitted_by || \"\",\n    review_status: \"Pending Review\",\n    reviewer: \"Document Control Team\",\n    received_date: doc.date_received || \"\",\n    due_date: doc.review_due_date || \"\",\n    approved_date: \"\",\n    remarks: doc.ai_remarks || \"\"\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1616,
+        224
+      ],
+      "id": "8753e696-a318-4894-a092-2880bb75d8c2",
+      "name": "Prepare Approval Status Row"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY",
+          "mode": "list",
+          "cachedResultName": "AI Document Controller Register",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 2092126238,
+          "mode": "list",
+          "cachedResultName": "Approval_Status",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY/edit#gid=2092126238"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Approval_ID": "={{ $json.approval_id }}",
+            "Document_Number": "={{ $json.document_number }}",
+            "Document_Title": "={{ $json.document_title }}",
+            "Revision": "={{ $json.revision }}",
+            "Document_Type": "={{ $json.document_type }}",
+            "Discipline": "={{ $json.discipline }}",
+            "Submitted_By": "={{ $json.submitted_by }}",
+            "Review_Status": "={{ $json.review_status }}",
+            "Reviewer": "={{ $json.reviewer }}",
+            "Received_Date": "={{ $json.received_date }}",
+            "Due_Date": "={{ $json.due_date }}",
+            "Approved_Date": "={{ $json.approved_date }}",
+            "Remarks": "={{ $json.remarks }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Approval_ID",
+              "displayName": "Approval_ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Document_Number",
+              "displayName": "Document_Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Document_Title",
+              "displayName": "Document_Title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Revision",
+              "displayName": "Revision",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Document_Type",
+              "displayName": "Document_Type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Discipline",
+              "displayName": "Discipline",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Submitted_By",
+              "displayName": "Submitted_By",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Review_Status",
+              "displayName": "Review_Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Reviewer",
+              "displayName": "Reviewer",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Received_Date",
+              "displayName": "Received_Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Due_Date",
+              "displayName": "Due_Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Approved_Date",
+              "displayName": "Approved_Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Remarks",
+              "displayName": "Remarks",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1840,
+        224
+      ],
+      "id": "58fd99be-374b-43df-91aa-e34f7fd25268",
+      "name": "Append row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MoIECc4qtemsa9LP",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const doc = $items(\"Prepare Sheet Row With Drive Link1\")[0]?.json;\n\nif (!doc || !doc.document_number) {\n  throw new Error(\"Document data not found from Prepare Sheet Row With Drive Link1\");\n}\n\nreturn {\n  json: {\n    approval_id: `APR-${Date.now()}`,\n    document_number: doc.document_number || \"\",\n    document_title: doc.document_title || \"\",\n    revision: doc.revision || \"\",\n    document_type: doc.document_type || \"\",\n    discipline: doc.discipline || \"\",\n    submitted_by: doc.submitted_by || \"\",\n    review_status: \"Pending Review\",\n    reviewer: \"Document Control Team\",\n    received_date: doc.date_received || \"\",\n    due_date: doc.review_due_date || \"\",\n    approved_date: \"\",\n    remarks: doc.ai_remarks || \"\"\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1968,
+        -32
+      ],
+      "id": "3ea9204b-5dda-4e9a-bf04-9598dc9e926f",
+      "name": "Prepare Approval Status Row1"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY",
+          "mode": "list",
+          "cachedResultName": "AI Document Controller Register",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 2092126238,
+          "mode": "list",
+          "cachedResultName": "Approval_Status",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/13_yitfOLgBxhe9exJ-0WP2O504Tgtj0TTcSrohnCYEY/edit#gid=2092126238"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Approval_ID": "={{ $json.approval_id }}",
+            "Document_Number": "={{ $json.document_number }}",
+            "Document_Title": "={{ $json.document_title }}",
+            "Revision": "={{ $json.revision }}",
+            "Document_Type": "={{ $json.document_type }}",
+            "Discipline": "={{ $json.discipline }}",
+            "Submitted_By": "={{ $json.submitted_by }}",
+            "Review_Status": "={{ $json.review_status }}",
+            "Reviewer": "={{ $json.reviewer }}",
+            "Received_Date": "={{ $json.received_date }}",
+            "Due_Date": "={{ $json.due_date }}",
+            "Approved_Date": "={{ $json.approved_date }}",
+            "Remarks": "={{ $json.remarks }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Approval_ID",
+              "displayName": "Approval_ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Document_Number",
+              "displayName": "Document_Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Document_Title",
+              "displayName": "Document_Title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Revision",
+              "displayName": "Revision",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Document_Type",
+              "displayName": "Document_Type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Discipline",
+              "displayName": "Discipline",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Submitted_By",
+              "displayName": "Submitted_By",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Review_Status",
+              "displayName": "Review_Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Reviewer",
+              "displayName": "Reviewer",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Received_Date",
+              "displayName": "Received_Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Due_Date",
+              "displayName": "Due_Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Approved_Date",
+              "displayName": "Approved_Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Remarks",
+              "displayName": "Remarks",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2192,
+        -16
+      ],
+      "id": "99a727bf-a592-4627-9b82-7ad8b4d241db",
+      "name": "Append row in sheet1",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "MoIECc4qtemsa9LP",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "subject": "={{ \"Re: \" + $(\"Prepare Missing Info Reply Data\").item.json.email_subject }}",
+        "message": "={{ $(\"Prepare Missing Info Reply Data\").item.json.missing_reply_message }}",
+        "options": {
+          "sendTo": "={{ $('Receive Document Email').item.json.headers.from }}"
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1408,
+        -432
+      ],
+      "id": "336e4c47-2019-4b52-856d-7ce1c3d493cd",
+      "name": "Create Missing Info Draft Reply",
+      "webhookId": "fe78d361-ccb3-4a55-bbc3-bb86db538ec1",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "R2v4WjvICP2kD8tC",
+          "name": "Gmail account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "markAsRead",
+        "messageId": "={{ $items(\"Receive Document Email\")[0].json.id }}"
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        32,
+        128
+      ],
+      "id": "619b8250-5498-48b7-93ce-38608dd8005a",
+      "name": "Mark Email as Read",
+      "webhookId": "cb94636a-bcaa-4fe8-a25d-9c53beb15fb7",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "R2v4WjvICP2kD8tC",
+          "name": "Gmail account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "markAsRead",
+        "messageId": "={{ $items(\"Receive Document Email\")[0].json.id }}"
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1648,
+        -432
+      ],
+      "id": "3a6b219e-3cdc-447d-a019-647f6b9c441e",
+      "name": "Mark Email as Read1",
+      "webhookId": "cb94636a-bcaa-4fe8-a25d-9c53beb15fb7",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "R2v4WjvICP2kD8tC",
+          "name": "Gmail account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "markAsRead",
+        "messageId": "={{ $items(\"Receive Document Email\")[0].json.id }}"
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2592,
+        -288
+      ],
+      "id": "0674cf00-046c-4f55-8df1-cdcc9238a978",
+      "name": "Mark Email as Read2",
+      "webhookId": "cb94636a-bcaa-4fe8-a25d-9c53beb15fb7",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "R2v4WjvICP2kD8tC",
+          "name": "Gmail account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "markAsRead",
+        "messageId": "={{ $items(\"Receive Document Email\")[0].json.id }}"
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        3168,
+        -16
+      ],
+      "id": "ddcb8b93-7a99-4a4e-9cb7-c348dece7e3c",
+      "name": "Mark Email as Read3",
+      "webhookId": "cb94636a-bcaa-4fe8-a25d-9c53beb15fb7",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "R2v4WjvICP2kD8tC",
+          "name": "Gmail account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "markAsRead",
+        "messageId": "={{ $items(\"Receive Document Email\")[0].json.id }}"
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2768,
+        224
+      ],
+      "id": "5ababeb2-f030-4489-a34a-e50ed240df4f",
+      "name": "Mark Email as Read4",
+      "webhookId": "cb94636a-bcaa-4fe8-a25d-9c53beb15fb7",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "R2v4WjvICP2kD8tC",
+          "name": "Gmail account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {},
+        "options": {
+          "dataPropertyAttachmentsPrefixName": "attachment_",
+          "downloadAttachments": true
+        }
+      },
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -608,
+        -176
+      ],
+      "id": "5fe98209-5e08-400c-9c49-3ee9055c5bc1",
+      "name": "Receive Document Email",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "R2v4WjvICP2kD8tC",
+          "name": "Gmail account 2"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Check Attachment": {
+      "main": [
+        [
+          {
+            "node": "Prepare PDF Binary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare No Attachment Reply Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare PDF Binary": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "AI Extract Document Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Extract Document Metadata",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Extract Document Metadata": {
+      "main": [
+        [
+          {
+            "node": "Normalize AI Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize AI Output": {
+      "main": [
+        [
+          {
+            "node": "Check Missing Information",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Missing Information": {
+      "main": [
+        [
+          {
+            "node": "Prepare Missing Info Reply Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Existing Document Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Document to Drive": {
+      "main": [
+        [
+          {
+            "node": "Prepare Sheet Row With Drive Link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Sheet Row With Drive Link": {
+      "main": [
+        [
+          {
+            "node": "Append Document Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reattach PDF Binary": {
+      "main": [
+        [
+          {
+            "node": "Upload Document to Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Existing Document Log": {
+      "main": [
+        [
+          {
+            "node": "Check Duplicate and Revision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Duplicate and Revision": {
+      "main": [
+        [
+          {
+            "node": "Set Target Drive Folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Duplicate Document": {
+      "main": [
+        [
+          {
+            "node": "Prepare Duplicate Reply Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is New Revision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Duplicate Log": {
+      "main": [
+        [
+          {
+            "node": "Create Duplicate Draft Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Duplicate Reply Data": {
+      "main": [
+        [
+          {
+            "node": "Append Duplicate Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is New Revision": {
+      "main": [
+        [
+          {
+            "node": "Append Revision History",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reattach PDF Binary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Revision History": {
+      "main": [
+        [
+          {
+            "node": "Reattach PDF Binary1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reattach PDF Binary1": {
+      "main": [
+        [
+          {
+            "node": "Upload Document to Drive1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Document to Drive1": {
+      "main": [
+        [
+          {
+            "node": "Prepare Sheet Row With Drive Link1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Sheet Row With Drive Link1": {
+      "main": [
+        [
+          {
+            "node": "Append Document Log1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Missing Info Reply Data": {
+      "main": [
+        [
+          {
+            "node": "Append Missing Info Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Missing Info Log": {
+      "main": [
+        [
+          {
+            "node": "Create Missing Info Draft Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Document Log": {
+      "main": [
+        [
+          {
+            "node": "Prepare Approval Status Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Registered Reply Data": {
+      "main": [
+        [
+          {
+            "node": "Append Registered Email Reply Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Registered Email Reply Log": {
+      "main": [
+        [
+          {
+            "node": "Create Registered Draft Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Document Log1": {
+      "main": [
+        [
+          {
+            "node": "Prepare Approval Status Row1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Registered Email Reply Log1": {
+      "main": [
+        [
+          {
+            "node": "Create Registered Draft Reply1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Registered Reply Data2": {
+      "main": [
+        [
+          {
+            "node": "Append Registered Email Reply Log1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Target Drive Folder": {
+      "main": [
+        [
+          {
+            "node": "Is Duplicate Document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare No Attachment Reply Data": {
+      "main": [
+        [
+          {
+            "node": "Append No Attachment Reply Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append No Attachment Reply Log": {
+      "main": [
+        [
+          {
+            "node": "Create No Attachment Draft Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Approval Status Row": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet": {
+      "main": [
+        [
+          {
+            "node": "Prepare Registered Reply Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Approval Status Row1": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet1": {
+      "main": [
+        [
+          {
+            "node": "Prepare Registered Reply Data2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Missing Info Draft Reply": {
+      "main": [
+        [
+          {
+            "node": "Mark Email as Read1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create No Attachment Draft Reply": {
+      "main": [
+        [
+          {
+            "node": "Mark Email as Read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Duplicate Draft Reply": {
+      "main": [
+        [
+          {
+            "node": "Mark Email as Read2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Registered Draft Reply1": {
+      "main": [
+        [
+          {
+            "node": "Mark Email as Read3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Registered Draft Reply": {
+      "main": [
+        [
+          {
+            "node": "Mark Email as Read4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Receive Document Email": {
+      "main": [
+        [
+          {
+            "node": "Check Attachment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "cb7e457d-3bb0-407f-a333-fc662d6f97fa",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "0e6aa48c8b66bc4d2545a4b5a8dbd760abdf6fbb2387637798bc9b42bdcfb4a5"
+  },
+  "nodeGroups": [],
+  "id": "nbUPRkT69YfJW0p5",
+  "tags": []
+}
